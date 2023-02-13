@@ -128,7 +128,7 @@ class PNA(nn.Module):
                           mid_batch_norm=readout_batchnorm, out_dim=target_dim,
                           layers=readout_layers, batch_norm_momentum=batch_norm_momentum)
 
-    def forward(self, graph: dgl.DGLGraph):
+    def forward(self, graph: dgl.DGLGraph, feat, eweight=None):
         self.node_gnn(graph)
         readouts_to_cat = [dgl.readout_nodes(graph, 'feat', op=aggr) for aggr in self.readout_aggregators]
         readout = torch.cat(readouts_to_cat, dim=-1)
@@ -159,8 +159,8 @@ class PNAGNN(nn.Module):
         self.bond_encoder = BondEncoder(emb_dim=hidden_dim)
 
     def forward(self, graph: dgl.DGLGraph):
-        graph.ndata['feat'] = self.atom_encoder(graph.ndata['feat'])
-        graph.edata['feat'] = self.bond_encoder(graph.edata['feat'])
+        graph.ndata['feat'] = self.atom_encoder(graph.ndata['feat'].long())
+        graph.edata['feat'] = self.bond_encoder(graph.edata['feat'].long())
 
         for mp_layer in self.mp_layers:
             mp_layer(graph)

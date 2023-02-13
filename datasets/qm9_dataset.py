@@ -95,7 +95,7 @@ class QM9Dataset(Dataset):
 
     def __init__(self, return_types: list = None,
                  target_tasks: list = None,
-                 normalize: bool = True, device='cuda:0', num_radial: int = 6, transform=None, **kwargs):
+                 normalize: bool = True, device='cpu', num_radial: int = 6, transform=None, **kwargs):
         self.qm9_directory = 'dataset/QM9'
         self.processed_file = 'qm9_processed.pt'
         self.distances_file = 'qm9_distances.pt'

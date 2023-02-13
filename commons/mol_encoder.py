@@ -33,7 +33,7 @@ class AtomEncoder(torch.nn.Module):
 
     def forward(self, x):
         x_embedding = 0
-        for i in range(x.shape[1]):
+        for i in range(9):     #x.shape[1]):
             if self.padding:
                 x_embedding += self.atom_embedding_list[i](x[:, i] + 1)
             else:
@@ -64,7 +64,7 @@ class BondEncoder(torch.nn.Module):
 
     def forward(self, edge_attr):
         bond_embedding = 0
-        for i in range(edge_attr.shape[1]):
+        for i in range(3):   #edge_attr.shape[1]):
             if self.padding:
                 bond_embedding += self.bond_embedding_list[i](edge_attr[:, i] + 1)
             else:
