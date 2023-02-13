@@ -2,23 +2,8 @@ import argparse
 import os
 import re
 
-
 from icecream import install
 from plot_function import my_plot_function
-
-
-from commons.utils import seed_all, get_random_indices, TENSORBOARD_FUNCTIONS
-
-from trainer.byol_trainer import BYOLTrainer
-
-from trainer.graphcl_trainer import GraphCLTrainer
-from trainer.optimal_transport_trainer import OptimalTransportTrainer
-from trainer.philosophy_trainer import PhilosophyTrainer
-from trainer.self_supervised_ae_trainer import SelfSupervisedAETrainer
-
-from trainer.self_supervised_alternating_trainer import SelfSupervisedAlternatingTrainer
-
-from trainer.self_supervised_trainer import SelfSupervisedTrainer
 
 import yaml
 from datasets.custom_collate import *  # do not remove
@@ -30,15 +15,8 @@ from torch.optim.lr_scheduler import *  # do not remove
 from datasets.samplers import *  # do not remove
 
 from datasets.qm9_dataset import QM9Dataset
-from torch.utils.data import DataLoader, Subset
 
-from trainer.metrics import QM9DenormalizedL1, QM9DenormalizedL2, \
-    QM9SingleTargetDenormalizedL1, Rsquared, NegativeSimilarity, MeanPredictorLoss, \
-    PositiveSimilarity, ContrastiveAccuracy, TrueNegativeRate, TruePositiveRate, Alignment, Uniformity, \
-    BatchVariance, DimensionCovariance, MAE, PositiveSimilarityMultiplePositivesSeparate2d, \
-    NegativeSimilarityMultiplePositivesSeparate2d, OGBEvaluator, PearsonR, PositiveProb, NegativeProb, \
-    Conformer2DVariance, Conformer3DVariance, PCQM4MEvaluatorWrapper
-from trainer.trainer import Trainer
+from train import load_model, get_arguments
 
 # turn on for debugging C code like Segmentation Faults
 import faulthandler
@@ -140,15 +118,15 @@ def parse_arguments():
     p.add_argument('--transfer_3d', type=bool, default=False, help='set true to load the 3d network instead of the 2d network')
     p.add_argument('-f')
     
-    args, unknown = p.parse_known_args()
+    args, _ = p.parse_known_args()
     return  args   #p.parse_args()
 
 
 def load_model(args, data, device):
-    print(args.model_type)
+    print('Model type: ', args.model_type)
     model = globals()[args.model_type](avg_d=data.avg_degree if hasattr(data, 'avg_degree') else 1, device=device,
                                        **args.model_parameters)
-    print(args.pretrain_checkpoint)
+    print('Pre-train checkpoint: ', args.pretrain_checkpoint)
     if args.pretrain_checkpoint:
         print("READING CHECKPOINT")
         # get arguments used during pretraining
@@ -202,140 +180,12 @@ def get_arguments():
 
     return args
 
-def get_trainer(args, model, data, device, metrics):
-    tensorboard_functions = {function: TENSORBOARD_FUNCTIONS[function] for function in args.tensorboard_functions}
-    if args.model3d_type:
-        model3d = globals()[args.model3d_type](
-            node_dim=0,  # 3d model has no input node features
-            edge_dim=data[0][1].edata['d'].shape[
-                1] if args.use_e_features and isinstance(data[0][1], dgl.DGLGraph) else 0,
-            avg_d=data.avg_degree if hasattr(data, 'avg_degree') else 1,
-            **args.model3d_parameters)
-        print('3D model trainable params: ', sum(p.numel() for p in model3d.parameters() if p.requires_grad))
-
-        critic = None
-        if args.trainer == 'byol':
-            ssl_trainer = BYOLTrainer
-        elif args.trainer == 'alternating':
-            ssl_trainer = SelfSupervisedAlternatingTrainer
-        elif args.trainer == 'autoencoder':
-            ssl_trainer = SelfSupervisedAETrainer
-        elif args.trainer == 'contrastive':
-            ssl_trainer = SelfSupervisedTrainer
-        elif args.trainer == 'philosophy':
-            ssl_trainer = PhilosophyTrainer
-            critic = globals()[args.critic_type](**args.critic_parameters)
-        return ssl_trainer(model=model, model3d=model3d, critic=critic, args=args, metrics=metrics,
-                           main_metric=args.main_metric, main_metric_goal=args.main_metric_goal,
-                           optim=globals()[args.optimizer], loss_func=globals()[args.loss_func](**args.loss_params),
-                           critic_loss=globals()[args.critic_loss](**args.critic_loss_params), device=device,
-                           tensorboard_functions=tensorboard_functions,
-                           scheduler_step_per_batch=args.scheduler_step_per_batch)
-    else:
-        if args.trainer == 'optimal_transport':
-            trainer = OptimalTransportTrainer
-        elif args.trainer == 'graphcl_trainer':
-            trainer = GraphCLTrainer
-        else:
-            trainer = Trainer
-        return trainer(model=model, args=args, metrics=metrics, main_metric=args.main_metric,
-                       main_metric_goal=args.main_metric_goal, optim=globals()[args.optimizer],
-                       loss_func=globals()[args.loss_func](**args.loss_params), device=device,
-                       tensorboard_functions=tensorboard_functions,
-                       scheduler_step_per_batch=args.scheduler_step_per_batch)
-
-def eval_qm9(args, device, metrics_dict, model, num_pretrain, transfer_from_same_dataset, all_data):
-    # if args.dataset == 'qm9_rdkit':
-    #     all_data = QM9DatasetRDKITConformers(return_types=args.required_data, target_tasks=args.targets, device=device,
-    #                           dist_embedding=args.dist_embedding, num_radial=args.num_radial)
-    # elif args.dataset == 'qm9_neuralconf':
-
-    #     all_data = QM9DatasetGeomolConformers(return_types=args.required_data, target_tasks=args.targets, device=device,
-    #                           dist_embedding=args.dist_embedding, num_radial=args.num_radial)
-    # else:
-    #     all_data = QM9Dataset(return_types=args.required_data, target_tasks=args.targets, device=device,
-    #                       dist_embedding=args.dist_embedding, num_radial=args.num_radial)
-
-    all_idx = get_random_indices(len(all_data), args.seed_data)
-    model_idx = all_idx[:100000]
-    test_idx = all_idx[len(model_idx): len(model_idx) + int(0.1 * len(all_data))]
-    val_idx = all_idx[len(model_idx) + len(test_idx):]
-    train_idx = model_idx[:args.num_train]
-
-    if args.num_val != None:
-        train_idx = all_idx[:args.num_train]
-        val_idx = all_idx[len(train_idx): len(train_idx) + args.num_val]
-        test_idx = all_idx[len(train_idx) + args.num_val: len(train_idx) + 2*args.num_val]
-
-    #model, num_pretrain, transfer_from_same_dataset = load_model(args, data=all_data, device=device)
-    if transfer_from_same_dataset:
-        train_idx = model_idx[num_pretrain: num_pretrain + args.num_train]
-    print('model trainable params: ', sum(p.numel() for p in model.parameters() if p.requires_grad))
-
-
-    print(f'Training on {len(train_idx)} samples from the model sequences')
-    print(f'Validating on {len(val_idx)} samples')
-    print(f'Testing on {len(test_idx)} samples')
-    collate_function = globals()[args.collate_function] if args.collate_params == {} else globals()[
-        args.collate_function](**args.collate_params)
-    if args.train_sampler != None:
-        sampler = globals()[args.train_sampler](data_source=all_data, batch_size=args.batch_size, indices=train_idx)
-        train_loader = DataLoader(Subset(all_data, train_idx), batch_sampler=sampler, collate_fn=collate_function)
-    else:
-        train_loader = DataLoader(Subset(all_data, train_idx), batch_size=args.batch_size, shuffle=True,
-                                  collate_fn=collate_function)
-    val_loader = DataLoader(Subset(all_data, val_idx), batch_size=args.batch_size, collate_fn=collate_function)
-    test_loader = DataLoader(Subset(all_data, test_idx), batch_size=args.batch_size, collate_fn=collate_function)
-
-    metrics_dict.update({'mae_denormalized': QM9DenormalizedL1(dataset=all_data),
-                         'mse_denormalized': QM9DenormalizedL2(dataset=all_data)})
-    metrics = {metric: metrics_dict[metric] for metric in args.metrics if metric != 'qm9_properties'}
-    if 'qm9_properties' in args.metrics:
-        metrics.update(
-            {task: QM9SingleTargetDenormalizedL1(dataset=all_data, task=task) for task in all_data.target_tasks})
-
-    trainer = get_trainer(args=args, model=model, data=all_data, device=device, metrics=metrics)
-    print("\n\nRUNNING EHY LUNA <3:")
-    test_metrics = trainer.evaluation(test_loader, data_split='test')
-    return test_metrics, trainer.writer.log_dir
 
 
 args = get_arguments()
 # device = torch.device("cuda:0" if torch.cuda.is_available() and args.device == 'cuda' else "cpu")
 device = torch.device('cpu')
-metrics_dict = {'rsquared': Rsquared(),
-            'mae': MAE(),
-            'pearsonr': PearsonR(),
-            'ogbg-molhiv': OGBEvaluator(d_name='ogbg-molhiv', metric='rocauc'),
-            'ogbg-molpcba': OGBEvaluator(d_name='ogbg-molpcba', metric='ap'),
-            'ogbg-molbace': OGBEvaluator(d_name='ogbg-molbace', metric='rocauc'),
-            'ogbg-molbbbp': OGBEvaluator(d_name='ogbg-molbbbp', metric='rocauc'),
-            'ogbg-molclintox': OGBEvaluator(d_name='ogbg-molclintox', metric='rocauc'),
-            'ogbg-moltoxcast': OGBEvaluator(d_name='ogbg-moltoxcast', metric='rocauc'),
-            'ogbg-moltox21': OGBEvaluator(d_name='ogbg-moltox21', metric='rocauc'),
-            'ogbg-mollipo': OGBEvaluator(d_name='ogbg-mollipo', metric='rmse'),
-            'ogbg-molmuv': OGBEvaluator(d_name='ogbg-molmuv', metric='ap'),
-            'ogbg-molsider': OGBEvaluator(d_name='ogbg-molsider', metric='rocauc'),
-            'ogbg-molfreesolv': OGBEvaluator(d_name='ogbg-molfreesolv', metric='rmse'),
-            'ogbg-molesol': OGBEvaluator(d_name='ogbg-molesol', metric='rmse'),
-            'pcqm4m': PCQM4MEvaluatorWrapper(),
-            'conformer_3d_variance': Conformer3DVariance(),
-            'conformer_2d_variance': Conformer2DVariance(),
-            'positive_similarity': PositiveSimilarity(),
-            'positive_similarity_multiple_positives_separate2d': PositiveSimilarityMultiplePositivesSeparate2d(),
-            'positive_prob': PositiveProb(),
-            'negative_prob': NegativeProb(),
-            'negative_similarity': NegativeSimilarity(),
-            'negative_similarity_multiple_positives_separate2d': NegativeSimilarityMultiplePositivesSeparate2d(),
-            'contrastive_accuracy': ContrastiveAccuracy(threshold=0.5009),
-            'true_negative_rate': TrueNegativeRate(threshold=0.5009),
-            'true_positive_rate': TruePositiveRate(threshold=0.5009),
-            'mean_predictor_loss': MeanPredictorLoss(globals()[args.loss_func](**args.loss_params)),
-            'uniformity': Uniformity(t=2),
-            'alignment': Alignment(alpha=2),
-            'batch_variance': BatchVariance(),
-            'dimension_covariance': DimensionCovariance()
-            }
+
 dataset = QM9Dataset(return_types=args.required_data, target_tasks=args.targets, device=device,
                           dist_embedding=args.dist_embedding, num_radial=args.num_radial)
 model, num_pretrain, transfer_from_same_dataset = load_model(args, data=dataset, device=device)

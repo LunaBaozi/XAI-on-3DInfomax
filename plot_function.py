@@ -13,13 +13,13 @@ from myEdgeDrawer import my_draw_networkx_edge_labels
 figure(figsize=(10, 8), dpi=360)
 
 def my_plot_function(saving_path, graph_idx, it_index, smiles, edge_mask):
-    mol_graph = smiles2graph(smiles)
+    graph_from_smile = smiles2graph(smiles)
     mol = pysmiles.read_smiles(smiles, explicit_hydrogen=True)
     elements = nx.get_node_attributes(mol, name = "element")
 
-    src = mol_graph['edge_index'][0]
-    dst = mol_graph['edge_index'][1]
-    mol_graph = dgl.graph((src, dst))
+    src = graph_from_smile['edge_index'][0]
+    dst = graph_from_smile['edge_index'][1]
+    graph_from_smile = dgl.graph((src, dst))
 
     # Mean-weighted unidirectional edges 
     unidir_edges = {}
