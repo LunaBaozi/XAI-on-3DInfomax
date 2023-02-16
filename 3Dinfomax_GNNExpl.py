@@ -1,6 +1,7 @@
 import argparse
 import os
 import re
+import random
 
 from icecream import install
 from plot_function import my_plot_function
@@ -201,10 +202,10 @@ def XAI(graph_idx, model, dataset):
     end_atom = qm9_processed['atom_slices'][graph_idx+1]
     start_edge = qm9_processed['edge_slices'][graph_idx]
     end_edge = qm9_processed['edge_slices'][graph_idx+1]
-    # source_edges = qm9_processed['edge_indices'][0][start_edge:end_edge]
-    # target_edges = qm9_processed['edge_indices'][1][start_edge:end_edge]
+    source_edges = qm9_processed['edge_indices'][0][start_edge:end_edge]
+    target_edges = qm9_processed['edge_indices'][1][start_edge:end_edge]
     atom_features = qm9_processed['atom_features'][start_atom:end_atom]
-    # edge_features = qm9_processed['edge_features'][start_edge:end_edge]
+    edge_features = qm9_processed['edge_features'][start_edge:end_edge]
 
     g = dataset[graph_idx]
     graph = g[0]
@@ -231,6 +232,12 @@ def XAI(graph_idx, model, dataset):
     return
 
 
-# for i in range(124440, 124450):
+random_explanations = random.sample(range(1, len(dataset)), 15)
+# for i in range(50, 3501, 70):
 #     XAI(i, model=model, dataset=dataset)
-XAI(124440, model=model, dataset=dataset)
+# XAI(124440, model=model, dataset=dataset)
+
+for i in random_explanations:
+    XAI(i, model=model, dataset=dataset)
+
+# print(len(dataset))  # 130831
